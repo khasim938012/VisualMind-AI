@@ -12,9 +12,11 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@google/genai": "^2.15.0",
     "axios": "^1.19.0",
     "cheerio": "^1.2.0",
     "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "sqlite3": "^6.0.1"
   },

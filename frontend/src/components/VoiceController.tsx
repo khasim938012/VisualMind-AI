@@ -6,7 +6,7 @@ import axios from 'axios';
 const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
 export const VoiceController: React.FC = () => {
-  const { status, setStatus, explanation, setExplanation, setImageUrl, addHistoryItem, pushContext, popContext } = useStore();
+  const { status, setStatus, setImageUrl, setVideoUrl, setModelName, addHistoryItem, pushContext, popContext } = useStore();
   const recognitionRef = useRef<any>(null);
   const synth = window.speechSynthesis;
   
@@ -19,6 +19,7 @@ export const VoiceController: React.FC = () => {
   const isSpeaking = useRef(false);
   const currentSentence = useRef('');
   const remainingStreamText = useRef(''); // For interruption
+  const rawBuffer = useRef(''); // For tag parsing
 
   useEffect(() => {
     const loadVoices = () => {
@@ -68,9 +69,13 @@ export const VoiceController: React.FC = () => {
     }
 
     setStatus('thinking');
-    setExplanation('');
     setSubtitle('');
+    setImageUrl(null);
+    setVideoUrl(null);
+    setModelName(null);
+    useStore.getState().setAnimationData(null);
     remainingStreamText.current = '';
+    rawBuffer.current = '';
     addHistoryItem({ role: 'user', content: query });
 
     fetchStream(query);
@@ -84,7 +89,17 @@ export const VoiceController: React.FC = () => {
         eventSource.onmessage = (event) => {
             if (event.data === '[DONE]') {
                 eventSource.close();
-                // Check if we need to pop context after speaking finishes
+                
+                // Flush anything left in the rawBuffer as a sentence if it exists and has no unclosed tags
+                if (rawBuffer.current && !rawBuffer.current.includes('[')) {
+                    currentSentence.current += rawBuffer.current;
+                    rawBuffer.current = '';
+                    if (currentSentence.current.trim() !== '') {
+                        utteranceQueue.current.push(currentSentence.current);
+                        currentSentence.current = '';
+                        processQueue();
+                    }
+                }
                 return;
             }
 
@@ -106,23 +121,69 @@ export const VoiceController: React.FC = () => {
   };
 
   const processChunk = (chunk: string) => {
-    // Check for image tag
-    const imgMatch = chunk.match(/\[IMAGE:(.*?)\]/);
-    let textChunk = chunk;
-    if (imgMatch) {
+    rawBuffer.current += chunk;
+
+    // Check for Image tag
+    let imgMatch;
+    while ((imgMatch = rawBuffer.current.match(/\[IMAGE:(.*?)\]/))) {
         fetchWikipediaImage(imgMatch[1].trim());
-        textChunk = chunk.replace(/\[IMAGE:.*?\]/, '');
+        rawBuffer.current = rawBuffer.current.replace(/\[IMAGE:.*?\]/, '');
     }
 
-    remainingStreamText.current += textChunk;
-    currentSentence.current += textChunk;
+    // Check for Video tag
+    let vidMatch;
+    while ((vidMatch = rawBuffer.current.match(/\[VIDEO:(.*?)\]/))) {
+        setVideoUrl(`https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(vidMatch[1].trim())}&autoplay=1&mute=1`);
+        rawBuffer.current = rawBuffer.current.replace(/\[VIDEO:.*?\]/, '');
+    }
 
-    // Split by sentence boundaries to speak in natural chunks
-    if (currentSentence.current.match(/[.!?]\s/)) {
-        const sentence = currentSentence.current;
-        currentSentence.current = '';
-        utteranceQueue.current.push(sentence);
-        processQueue();
+    // Check for Model tag
+    let modMatch;
+    while ((modMatch = rawBuffer.current.match(/\[MODEL:(.*?)\]/))) {
+        setModelName(modMatch[1].trim().toLowerCase());
+        rawBuffer.current = rawBuffer.current.replace(/\[MODEL:.*?\]/, '');
+    }
+    
+    // Check for ANIMATE tag
+    let animMatch;
+    while ((animMatch = rawBuffer.current.match(/\[ANIMATE:\s*({.*?})\s*\]/))) {
+        try {
+            const animData = JSON.parse(animMatch[1]);
+            useStore.getState().setAnimationData(animData);
+        } catch(e) {
+            console.error("Failed to parse animation json");
+        }
+        rawBuffer.current = rawBuffer.current.replace(/\[ANIMATE:.*?\]/, '');
+    }
+    
+    // Check for NONE tag
+    while (rawBuffer.current.includes('[NONE]')) {
+        rawBuffer.current = rawBuffer.current.replace(/\[NONE\]/g, '');
+    }
+
+    // Determine safe text to speak (avoiding partially streamed tags)
+    const openBracketIndex = rawBuffer.current.lastIndexOf('[');
+    let safeText = '';
+    
+    if (openBracketIndex !== -1) {
+        safeText = rawBuffer.current.substring(0, openBracketIndex);
+        rawBuffer.current = rawBuffer.current.substring(openBracketIndex);
+    } else {
+        safeText = rawBuffer.current;
+        rawBuffer.current = '';
+    }
+
+    if (safeText) {
+        remainingStreamText.current += safeText;
+        currentSentence.current += safeText;
+
+        // Split by sentence boundaries to speak in natural chunks
+        if (currentSentence.current.match(/[.!?]\s/)) {
+            const sentence = currentSentence.current;
+            currentSentence.current = '';
+            utteranceQueue.current.push(sentence);
+            processQueue();
+        }
     }
   };
 
@@ -177,17 +238,29 @@ export const VoiceController: React.FC = () => {
 
   const fetchWikipediaImage = async (query: string) => {
     try {
-        const url = `https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&format=json&piprop=original&titles=${encodeURIComponent(query)}&origin=*`;
-        const res = await axios.get(url);
-        const pages = res.data.query.pages;
-        const pageId = Object.keys(pages)[0];
-        if (pages[pageId].original) {
-            setImageUrl(pages[pageId].original.source);
+        // Step 1: OpenSearch to get the exact Wikipedia article title
+        const searchUrl = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=1&namespace=0&format=json&origin=*`;
+        const searchRes = await axios.get(searchUrl);
+        
+        if (searchRes.data[1] && searchRes.data[1].length > 0) {
+            const actualTitle = searchRes.data[1][0];
+            
+            // Step 2: Fetch the high-res image for that exact title
+            const imgUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&format=json&piprop=original&titles=${encodeURIComponent(actualTitle)}&origin=*`;
+            const imgRes = await axios.get(imgUrl);
+            const pages = imgRes.data.query.pages;
+            const pageId = Object.keys(pages)[0];
+            
+            if (pages[pageId] && pages[pageId].original) {
+                setImageUrl(pages[pageId].original.source);
+            } else {
+                console.log(`No image found on page for ${actualTitle}`);
+            }
         } else {
-            setImageUrl(null);
+            console.log(`No Wikipedia article found for ${query}`);
         }
     } catch(e) {
-        setImageUrl(null);
+        console.error(`Error fetching image for ${query}`, e);
     }
   };
 

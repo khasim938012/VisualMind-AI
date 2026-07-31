@@ -3,6 +3,9 @@ import cors from 'cors';
 import { dbRun, dbAll } from './db';
 import { askLLMStream } from './llm';
 import { fetchWebContext } from './scraper';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const app = express();
 const PORT = 3001;

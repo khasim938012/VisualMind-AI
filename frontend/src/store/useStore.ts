@@ -12,6 +12,9 @@ interface AppState {
   transcript: string;
   explanation: string;
   imageUrl: string | null;
+  videoUrl: string | null;
+  modelName: string | null;
+  animationData: { pistons: string, blockOpacity: number, explode: boolean } | null;
   history: HistoryItem[];
   contextStack: { question: string, textRemaining: string }[];
   
@@ -20,6 +23,9 @@ interface AppState {
   setExplanation: (text: string) => void;
   appendExplanation: (text: string) => void;
   setImageUrl: (url: string | null) => void;
+  setVideoUrl: (url: string | null) => void;
+  setModelName: (name: string | null) => void;
+  setAnimationData: (data: any) => void;
   setHistory: (history: HistoryItem[]) => void;
   addHistoryItem: (item: Omit<HistoryItem, 'id' | 'timestamp'>) => void;
   
@@ -32,6 +38,9 @@ export const useStore = create<AppState>((set, get) => ({
   transcript: '',
   explanation: '',
   imageUrl: null,
+  videoUrl: null,
+  modelName: null,
+  animationData: null,
   history: [],
   contextStack: [],
   
@@ -39,7 +48,10 @@ export const useStore = create<AppState>((set, get) => ({
   setTranscript: (transcript) => set({ transcript }),
   setExplanation: (explanation) => set({ explanation }),
   appendExplanation: (text) => set((state) => ({ explanation: state.explanation + text })),
-  setImageUrl: (imageUrl) => set({ imageUrl }),
+  setImageUrl: (imageUrl) => set({ imageUrl, videoUrl: null, modelName: null }),
+  setVideoUrl: (videoUrl) => set({ videoUrl, imageUrl: null, modelName: null }),
+  setModelName: (modelName) => set({ modelName, imageUrl: null, videoUrl: null }),
+  setAnimationData: (animationData) => set({ animationData }),
   setHistory: (history) => set({ history }),
   addHistoryItem: (item) => set((state) => ({
     history: [...state.history, { ...item, id: Date.now(), timestamp: new Date().toISOString() }]

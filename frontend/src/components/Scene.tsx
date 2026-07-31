@@ -1,7 +1,7 @@
 import React from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Stars } from '@react-three/drei';
-import { HologramViewer } from './HologramViewer';
+import { MediaViewer } from './MediaViewer';
 
 export const Scene: React.FC = () => {
   return (
@@ -14,7 +14,7 @@ export const Scene: React.FC = () => {
         <color attach="background" args={['#030305']} />
         <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
         
-        <HologramViewer />
+        <MediaViewer />
         
         <OrbitControls enablePan={true} enableZoom={true} enableRotate={true} />
       </Canvas>

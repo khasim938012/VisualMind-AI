@@ -45,7 +45,51 @@ body, html, #root {
   left: 0;
   width: 100%;
   height: 100%;
-  z-index: 1;
+  z-index: 2; /* above background, below UI */
+}
+
+/* Cinematic Full Screen Media */
+.fullscreen-media {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 1; /* Lowest z-index, acts as background */
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #000;
+}
+
+.fullscreen-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  animation: slowZoom 20s infinite alternate linear;
+}
+
+.fullscreen-media iframe {
+  width: 100vw;
+  height: 100vh; /* Actually 100vh might show black bars if aspect ratio doesn't match, object-fit cover equivalent for iframes is harder, but this is fine */
+  transform: scale(1.2); /* Zoom slightly to hide edges */
+}
+
+.vignette-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(circle, transparent 20%, #000 100%);
+  pointer-events: none;
+  z-index: 2;
+}
+
+@keyframes slowZoom {
+  from { transform: scale(1); }
+  to { transform: scale(1.1); }
 }
 
 /* Professional Sidebar */

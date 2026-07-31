@@ -10,11 +10,29 @@ export const db = new sqlite3.Database(dbPath, (err) => {
         
         // Initialize tables
         db.serialize(() => {
+            db.run(`CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )`);
+
+            // Check if session_id column exists, if not add it
+            db.all("PRAGMA table_info(history)", (err, rows: any[]) => {
+                if (err) return;
+                const hasSessionId = rows.some(row => row.name === 'session_id');
+                if (!hasSessionId) {
+                    // This handles migrations if the table already exists
+                    db.run(`ALTER TABLE history ADD COLUMN session_id TEXT DEFAULT 'default'`);
+                }
+            });
+
             db.run(`CREATE TABLE IF NOT EXISTS history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT DEFAULT 'default',
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES sessions(id)
             )`);
             
             db.run(`CREATE TABLE IF NOT EXISTS memory (
