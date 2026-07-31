@@ -83,7 +83,8 @@ export const VoiceController: React.FC = () => {
 
   const fetchStream = async (query: string) => {
     try {
-        const url = `http://localhost:3001/api/chat/stream?message=${encodeURIComponent(query)}`;
+        const sessionId = useStore.getState().currentSessionId;
+        const url = `http://localhost:3001/api/chat/stream?message=${encodeURIComponent(query)}&sessionId=${sessionId}`;
         const eventSource = new EventSource(url);
 
         eventSource.onmessage = (event) => {

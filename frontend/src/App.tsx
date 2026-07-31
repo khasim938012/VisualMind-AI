@@ -33,7 +33,7 @@ const App: React.FC = () => {
 
       <Sidebar />
       <div className="main-content">
-        <Scene />
+        {useStore().modelName === 'engine' && <Scene />}
         <VoiceController />
       </div>
     </div>

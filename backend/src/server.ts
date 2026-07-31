@@ -16,6 +16,7 @@ app.use(express.json());
 // Server-Sent Events Endpoint for real-time streaming
 app.get('/api/chat/stream', async (req, res) => {
     const message = req.query.message as string;
+    const sessionId = (req.query.sessionId as string) || 'default';
     if (!message) return res.status(400).json({ error: "Message is required" });
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -34,8 +35,8 @@ app.get('/api/chat/stream', async (req, res) => {
         });
 
         // Save to DB after stream finishes
-        await dbRun('INSERT INTO history (role, content) VALUES (?, ?)', ['user', message]);
-        await dbRun('INSERT INTO history (role, content) VALUES (?, ?)', ['assistant', fullResponse.replace(/\[IMAGE:.*?\]/g, '').trim()]);
+        await dbRun('INSERT INTO history (session_id, role, content) VALUES (?, ?, ?)', [sessionId, 'user', message]);
+        await dbRun('INSERT INTO history (session_id, role, content) VALUES (?, ?, ?)', [sessionId, 'assistant', fullResponse.replace(/\[IMAGE:.*?\]/g, '').trim()]);
 
         res.write(`data: [DONE]\n\n`);
         res.end();
@@ -58,12 +59,34 @@ app.post('/api/memory', async (req, res) => {
     }
 });
 
+// Get all sessions
+app.get('/api/sessions', async (req, res) => {
+    try {
+        const sessions = await dbAll('SELECT * FROM sessions ORDER BY timestamp DESC');
+        res.json(sessions);
+    } catch (e) {
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
+// Create new session
+app.post('/api/sessions', express.json(), async (req, res) => {
+    try {
+        const { id, title } = req.body;
+        await dbRun('INSERT INTO sessions (id, title) VALUES (?, ?)', [id, title]);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
 app.get('/api/history', async (req, res) => {
     try {
-        const rows = await dbAll('SELECT * FROM history ORDER BY timestamp DESC LIMIT 50');
-        res.json(rows.reverse());
-    } catch (error) {
-        res.status(500).json({ error: "Internal Server Error" });
+        const sessionId = req.query.sessionId || 'default';
+        const history = await dbAll('SELECT * FROM history WHERE session_id = ? ORDER BY timestamp ASC', [sessionId]);
+        res.json(history);
+    } catch (e) {
+        res.status(500).json({ error: 'Database error' });
     }
 });
 
