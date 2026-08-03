@@ -13,6 +13,13 @@ export const VoiceController: React.FC = () => {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoice, setSelectedVoice] = useState<string>('');
   const [subtitle, setSubtitle] = useState<string>('');
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const isMutedRef = useRef(false);
+  const statusRef = useRef(status);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
   
   // Streaming state
   const utteranceQueue = useRef<string[]>([]);
@@ -20,6 +27,19 @@ export const VoiceController: React.FC = () => {
   const currentSentence = useRef('');
   const remainingStreamText = useRef(''); // For interruption
   const rawBuffer = useRef(''); // For tag parsing
+  const activeEventSource = useRef<EventSource | null>(null);
+  const imageCache = useRef<Record<string, string>>({});
+
+  const { currentSessionId } = useStore();
+  
+  // Clear subtitle and stop speaking when a new chat starts
+  useEffect(() => {
+     setSubtitle('');
+     utteranceQueue.current = [];
+     isSpeaking.current = false;
+     imageCache.current = {};
+     synth.cancel();
+  }, [currentSessionId]);
 
   useEffect(() => {
     const loadVoices = () => {
@@ -47,20 +67,39 @@ export const VoiceController: React.FC = () => {
       };
 
       recognitionRef.current.onend = () => {
-        // Auto restart for continuous listening
-        if (status === 'listening' || status === 'explaining' || status === 'thinking') {
+        // Auto restart for continuous listening unless muted
+        if (!isMutedRef.current && (statusRef.current === 'listening' || statusRef.current === 'explaining' || statusRef.current === 'thinking')) {
             try { recognitionRef.current.start(); } catch(e){}
         }
       };
     }
   }, []);
 
+  const toggleMute = () => {
+      const newMuted = !isMuted;
+      setIsMuted(newMuted);
+      isMutedRef.current = newMuted;
+      if (newMuted) {
+          try { recognitionRef.current?.stop(); } catch(e){}
+          setStatus('idle');
+      } else {
+          startListening();
+      }
+  };
+
   const handleUserQuery = async (query: string) => {
     // Interruption Logic
-    if (status === 'explaining' || status === 'thinking') {
+    const currentStatus = useStore.getState().status;
+    if (currentStatus === 'explaining' || currentStatus === 'thinking' || currentStatus === 'listening') {
         synth.cancel();
         isSpeaking.current = false;
         utteranceQueue.current = [];
+        
+        // Kill any active stream from the backend
+        if (activeEventSource.current) {
+            activeEventSource.current.close();
+            activeEventSource.current = null;
+        }
         
         // Save current context if there is substantial text left
         if (remainingStreamText.current.length > 20) {
@@ -85,7 +124,10 @@ export const VoiceController: React.FC = () => {
     try {
         const sessionId = useStore.getState().currentSessionId;
         const url = `http://localhost:3001/api/chat/stream?message=${encodeURIComponent(query)}&sessionId=${sessionId}`;
+        
+        if (activeEventSource.current) activeEventSource.current.close();
         const eventSource = new EventSource(url);
+        activeEventSource.current = eventSource;
 
         eventSource.onmessage = (event) => {
             if (event.data === '[DONE]') {
@@ -95,12 +137,15 @@ export const VoiceController: React.FC = () => {
                 if (rawBuffer.current && !rawBuffer.current.includes('[')) {
                     currentSentence.current += rawBuffer.current;
                     rawBuffer.current = '';
-                    if (currentSentence.current.trim() !== '') {
-                        utteranceQueue.current.push(currentSentence.current);
-                        currentSentence.current = '';
-                        processQueue();
-                    }
                 }
+                if (currentSentence.current.trim() !== '') {
+                    utteranceQueue.current.push(currentSentence.current);
+                    currentSentence.current = '';
+                }
+                
+                // START PRESENTATION ONLY WHEN FULLY DONE THINKING
+                // This perfectly simulates taking a moment to plan and collect all images before starting.
+                processQueue();
                 return;
             }
 
@@ -127,39 +172,34 @@ export const VoiceController: React.FC = () => {
     // Check for Image tag
     let imgMatch;
     while ((imgMatch = rawBuffer.current.match(/\[IMAGE:(.*?)\]/))) {
-        fetchWikipediaImage(imgMatch[1].trim());
-        rawBuffer.current = rawBuffer.current.replace(/\[IMAGE:.*?\]/, '');
+        const term = imgMatch[1].trim();
+        fetchWikimediaImage(term).then(url => {
+            if (url) imageCache.current[term] = url;
+        });
+        rawBuffer.current = rawBuffer.current.replace(/\[IMAGE:.*?\]/, `{|IMG:${term}|}`);
     }
 
     // Check for Video tag
     let vidMatch;
     while ((vidMatch = rawBuffer.current.match(/\[VIDEO:(.*?)\]/))) {
-        setVideoUrl(`https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(vidMatch[1].trim())}&autoplay=1&mute=1`);
-        rawBuffer.current = rawBuffer.current.replace(/\[VIDEO:.*?\]/, '');
+        rawBuffer.current = rawBuffer.current.replace(/\[VIDEO:.*?\]/, `{|VID:${vidMatch[1].trim()}|}`);
     }
 
     // Check for Model tag
     let modMatch;
     while ((modMatch = rawBuffer.current.match(/\[MODEL:(.*?)\]/))) {
-        setModelName(modMatch[1].trim().toLowerCase());
-        rawBuffer.current = rawBuffer.current.replace(/\[MODEL:.*?\]/, '');
+        rawBuffer.current = rawBuffer.current.replace(/\[MODEL:.*?\]/, `{|MOD:${modMatch[1].trim().toLowerCase()}|}`);
     }
     
     // Check for ANIMATE tag
     let animMatch;
     while ((animMatch = rawBuffer.current.match(/\[ANIMATE:\s*({.*?})\s*\]/))) {
-        try {
-            const animData = JSON.parse(animMatch[1]);
-            useStore.getState().setAnimationData(animData);
-        } catch(e) {
-            console.error("Failed to parse animation json");
-        }
-        rawBuffer.current = rawBuffer.current.replace(/\[ANIMATE:.*?\]/, '');
+        rawBuffer.current = rawBuffer.current.replace(/\[ANIMATE:.*?\]/, `{|ANI:${animMatch[1]}|}`);
     }
     
     // Check for NONE tag
     while (rawBuffer.current.includes('[NONE]')) {
-        rawBuffer.current = rawBuffer.current.replace(/\[NONE\]/g, '');
+        rawBuffer.current = rawBuffer.current.replace(/\[NONE\]/g, `{|NON|}`);
     }
 
     // Determine safe text to speak (avoiding partially streamed tags)
@@ -183,7 +223,7 @@ export const VoiceController: React.FC = () => {
             const sentence = currentSentence.current;
             currentSentence.current = '';
             utteranceQueue.current.push(sentence);
-            processQueue();
+            // Intentionally not calling processQueue() here so we wait until stream is fully done!
         }
     }
   };
@@ -193,8 +233,63 @@ export const VoiceController: React.FC = () => {
     
     isSpeaking.current = true;
     setStatus('explaining');
-    const textToSpeak = utteranceQueue.current.shift() || '';
+    let textToSpeak = utteranceQueue.current.shift() || '';
     
+    // Check for embedded tags to sync visually with voice
+    const vidMatch = textToSpeak.match(/\{\|VID:(.*?)\|\}/);
+    if (vidMatch) {
+        setVideoUrl(`https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(vidMatch[1])}&autoplay=1&mute=1`);
+        setImageUrl(null);
+        setModelName(null);
+    }
+    
+    const modMatch = textToSpeak.match(/\{\|MOD:(.*?)\|\}/);
+    if (modMatch) {
+        setModelName(modMatch[1]);
+        setImageUrl(null);
+        setVideoUrl(null);
+    }
+    
+    const aniMatch = textToSpeak.match(/\{\|ANI:(.*?)\|\}/);
+    if (aniMatch) {
+        try { useStore.getState().setAnimationData(JSON.parse(aniMatch[1])); } catch(e){}
+    }
+    
+    const nonMatch = textToSpeak.match(/\{\|NON\|\}/);
+    if (nonMatch) {
+        setImageUrl(null);
+        setVideoUrl(null);
+        setModelName(null);
+    }
+
+    const imgMatch = textToSpeak.match(/\{\|IMG:(.*?)\|\}/);
+    
+    // Clean all tags from spoken text
+    textToSpeak = textToSpeak.replace(/\{\|.*?\|\}/g, '');
+
+    if (imgMatch) {
+        const term = imgMatch[1];
+        setVideoUrl(null);
+        setModelName(null);
+        
+        const cachedUrl = imageCache.current[term];
+        if (cachedUrl) {
+            setImageUrl(cachedUrl);
+            setTimeout(() => speakUtterance(textToSpeak), 800);
+            return;
+        } else {
+            fetchWikimediaImage(term).then(url => {
+                if (url) setImageUrl(url);
+                setTimeout(() => speakUtterance(textToSpeak), url ? 800 : 0);
+            });
+            return;
+        }
+    }
+    
+    speakUtterance(textToSpeak);
+  };
+
+  const speakUtterance = (textToSpeak: string) => {
     // Update subtitle display (last 2 sentences roughly)
     setSubtitle(prev => {
         const combined = prev + ' ' + textToSpeak;
@@ -218,16 +313,12 @@ export const VoiceController: React.FC = () => {
                 // Done explaining this thought. Check context stack.
                 const ctx = popContext();
                 if (ctx) {
-                    setTimeout(() => {
-                        const resumePhrase = " Returning to the previous topic... ";
-                        currentSentence.current = resumePhrase + ctx.textRemaining;
-                        remainingStreamText.current = ctx.textRemaining;
-                        utteranceQueue.current.push(currentSentence.current);
-                        currentSentence.current = '';
-                        processQueue();
-                    }, 1000);
+                    const resumePhrase = " Returning to the previous topic... ";
+                    // Safely push to rawBuffer to allow chunking again instead of forcing a massive utterance
+                    rawBuffer.current = resumePhrase + ctx.textRemaining;
+                    processChunk('');
                 } else {
-                    setStatus('listening');
+                    if (!isMutedRef.current) setStatus('listening');
                     setSubtitle('');
                 }
             }
@@ -237,35 +328,33 @@ export const VoiceController: React.FC = () => {
     synth.speak(utterance);
   };
 
-  const fetchWikipediaImage = async (query: string) => {
+  const fetchWikimediaImage = async (query: string): Promise<string | null> => {
     try {
-        // Step 1: OpenSearch to get the exact Wikipedia article title
-        const searchUrl = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=1&namespace=0&format=json&origin=*`;
-        const searchRes = await axios.get(searchUrl);
+        const searchUrl = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrnamespace=6&gsrlimit=1&prop=imageinfo&iiprop=url&format=json&origin=*`;
+        const res = await fetch(searchUrl);
+        const data = await res.json();
+        const pages = data.query?.pages;
         
-        if (searchRes.data[1] && searchRes.data[1].length > 0) {
-            const actualTitle = searchRes.data[1][0];
-            
-            // Step 2: Fetch the high-res image for that exact title
-            const imgUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&format=json&piprop=original&titles=${encodeURIComponent(actualTitle)}&origin=*`;
-            const imgRes = await axios.get(imgUrl);
-            const pages = imgRes.data.query.pages;
+        if (pages) {
             const pageId = Object.keys(pages)[0];
-            
-            if (pages[pageId] && pages[pageId].original) {
-                setImageUrl(pages[pageId].original.source);
-            } else {
-                console.log(`No image found on page for ${actualTitle}`);
+            if (pages[pageId] && pages[pageId].imageinfo && pages[pageId].imageinfo[0]) {
+                const url = pages[pageId].imageinfo[0].url;
+                // Pre-download image bytes into browser memory instantly
+                const img = new Image();
+                img.src = url;
+                return url;
             }
-        } else {
-            console.log(`No Wikipedia article found for ${query}`);
         }
+        console.log(`No Wikimedia Commons image found for ${query}`);
+        return null;
     } catch(e) {
         console.error(`Error fetching image for ${query}`, e);
+        return null;
     }
   };
 
   const startListening = () => {
+    if (isMutedRef.current) return;
     try { recognitionRef.current?.start(); } catch(e){}
     setStatus('listening');
   };
@@ -280,10 +369,16 @@ export const VoiceController: React.FC = () => {
 
       <div className="voice-controls">
         <button 
-          className={`mic-button ${status === 'listening' ? 'listening' : ''} ${status === 'thinking' ? 'thinking' : ''}`}
-          onClick={startListening}
+          className={`mic-button ${status === 'listening' && !isMuted ? 'listening' : ''} ${status === 'thinking' ? 'thinking' : ''} ${isMuted ? 'muted' : ''}`}
+          onClick={toggleMute}
+          title={isMuted ? "Unmute Microphone" : "Mute Microphone"}
+          style={{ backgroundColor: isMuted ? '#ff3366' : '' }}
         >
-          {status === 'thinking' ? <Loader className="animate-spin" /> : <Mic />}
+          {status === 'thinking' ? <Loader className="animate-spin" /> : isMuted ? (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+          ) : (
+            <Mic />
+          )}
         </button>
 
         <div className="settings-row">

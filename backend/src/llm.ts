@@ -20,7 +20,7 @@ CRITICAL INSTRUCTION: You MUST select the BEST visual medium for your explanatio
 Visual Tags Available:
 1. [MODEL: engine] -> Use ONLY when the user specifically asks about how a CAR ENGINE works. This will load an interactive 3D engine.
 2. [VIDEO: search_term] -> Use if explaining a complex process or moving mechanism that is NOT a car engine.
-3. [IMAGE: search_term] -> Use for specific people, places, or branded items (e.g. "Tata Punch", "Eiffel Tower", "Car", "Mountain").
+3. [IMAGE: search_term] -> Use for specific people, places, concepts, or items. You have access to millions of images. The search_term can be anything (e.g. "Eiffel Tower", "happy dog", "mountain sunset", "Ferrari").
 4. [NONE] -> Use if answering a purely conversational question (e.g. "how are you?").
 
 IF YOU CHOOSE [MODEL: engine], you MUST ALSO output JSON animation coordinates sprinkled throughout your text to manipulate the engine in real-time. 
@@ -40,7 +40,7 @@ ${context || 'None'}
 
     try {
         const responseStream = await ai.models.generateContentStream({
-            model: 'gemini-3.6-flash',
+            model: 'gemini-3.5-flash-lite',
             contents: [
                 { role: 'user', parts: [{ text: systemPrompt + '\n\nUser Question: ' + prompt }] }
             ],
@@ -55,9 +55,21 @@ ${context || 'None'}
                 // Gemini sends larger chunks. This is perfectly fine since the VoiceController uses a rawBuffer now.
                 onData(chunk.text);
             }
-        }
     } catch (error) {
         console.error("Error communicating with Gemini:", error);
         onData(" I'm having trouble reaching my Gemini brain right now.");
+    }
+};
+
+export const askLLM = async (prompt: string, systemPrompt: string = "You are a helpful assistant.") => {
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-3.5-flash-lite',
+            contents: prompt,
+            config: { systemInstruction: systemPrompt }
+        });
+        return response.text;
+    } catch (e) {
+        return "New Chat";
     }
 };

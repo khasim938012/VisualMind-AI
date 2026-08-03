@@ -10,17 +10,18 @@ export const Sidebar: React.FC = () => {
       setSessions, 
       currentSessionId, 
       setCurrentSessionId, 
-      startNewChat 
+      startNewChat,
+      status
   } = useStore();
   
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   useEffect(() => {
-    // Fetch all sessions
+    // Fetch all sessions (runs on mount and when status changes, e.g. after a query finishes)
     axios.get('http://localhost:3001/api/sessions')
       .then(res => setSessions(res.data))
       .catch(err => console.error("Error fetching sessions", err));
-  }, [setSessions]);
+  }, [setSessions, status]);
 
   useEffect(() => {
     // Fetch history for current session
@@ -60,7 +61,7 @@ export const Sidebar: React.FC = () => {
   return (
     <div className="sidebar">
       <div className="sidebar-header">
-          <h2>Dashboard</h2>
+          <h2>VisualMind AI</h2>
           <button className="toggle-btn" onClick={() => setIsCollapsed(true)}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
           </button>
@@ -72,30 +73,18 @@ export const Sidebar: React.FC = () => {
       </button>
 
       <div className="sidebar-section">
-          <h3>Recent Chats</h3>
+          <h3>Past Questions</h3>
           <div className="sessions-list">
             {sessions.map((session) => (
                 <div 
                     key={session.id} 
                     className={`session-item ${session.id === currentSessionId ? 'active' : ''}`}
                     onClick={() => loadSession(session.id)}
+                    title="Click to load this discussion"
                 >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
                     <span>{session.title}</span>
                 </div>
-            ))}
-          </div>
-      </div>
-
-      <div className="sidebar-section history-section">
-          <h3>Current Chat</h3>
-          <div className="history-list">
-            {history.length === 0 && <div className="empty-state">No messages yet. Start speaking!</div>}
-            {history.map((item) => (
-              <div key={item.id} className={`history-item ${item.role}`}>
-                <strong>{item.role === 'user' ? 'You' : 'AI'}</strong>
-                <p>{item.content}</p>
-              </div>
             ))}
           </div>
       </div>

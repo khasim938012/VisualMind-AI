@@ -17,7 +17,9 @@
     "cheerio": "^1.2.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
+    "duckduckgo-images-api": "^1.0.5",
     "express": "^5.2.1",
+    "googlethis": "^1.8.0",
     "sqlite3": "^6.0.1"
   },
   "devDependencies": {

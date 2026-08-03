@@ -66,8 +66,13 @@ body, html, #root {
 .fullscreen-media img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  animation: slowZoom 20s infinite alternate linear;
+  object-fit: contain;
+  animation: fadeIn 1s ease, slowZoom 20s infinite alternate linear;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .fullscreen-media iframe {

@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { dbRun, dbAll } from './db';
-import { askLLMStream } from './llm';
+import { askLLMStream, askLLM } from './llm';
 import { fetchWebContext } from './scraper';
 import dotenv from 'dotenv';
 
@@ -35,6 +35,16 @@ app.get('/api/chat/stream', async (req, res) => {
         });
 
         // Save to DB after stream finishes
+        const historyCount = await dbAll('SELECT COUNT(*) as count FROM history WHERE session_id = ?', [sessionId]);
+        if (historyCount && historyCount[0] && historyCount[0].count === 0) {
+            let shortTitle = message.substring(0, 30);
+            try {
+                shortTitle = await askLLM(`Generate a 2 to 3 word title for this chat based on the user's first message: "${message}". Reply ONLY with the title, no quotes, no extra text.`, "You are a summarizer.");
+                shortTitle = shortTitle.trim();
+            } catch(e) {}
+            await dbRun('UPDATE sessions SET title = ? WHERE id = ?', [shortTitle, sessionId]);
+        }
+
         await dbRun('INSERT INTO history (session_id, role, content) VALUES (?, ?, ?)', [sessionId, 'user', message]);
         await dbRun('INSERT INTO history (session_id, role, content) VALUES (?, ?, ?)', [sessionId, 'assistant', fullResponse.replace(/\[IMAGE:.*?\]/g, '').trim()]);
 
